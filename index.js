@@ -8,13 +8,13 @@ const run = async () => {
     );
     console.log(offer.id)
   offer.free();
+  window.bolt12parser = {}
+  window.bolt12parser.Offer = Offer;
+  window.bolt12parser.Invoice = Invoice;
+  window.bolt12parser.run = run;
+  window.bolt12parser.bolt12 = await init("https://supertestnet.github.io/weld/boltz_bolt12_bg.wasm");
+  window.bolt12parser.init = init;
+  window.bolt12parser.offer = offer;
 };
-
-window.bolt12parser = {}
-window.bolt12parser.Offer = Offer;
-window.bolt12parser.Invoice = Invoice;
-window.bolt12parser.run = run;
-window.bolt12parser.bolt12 = await init("https://supertestnet.github.io/weld/boltz_bolt12_bg.wasm");
-window.bolt12parser.init = init;
 
 run();
