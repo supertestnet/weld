@@ -1,10 +1,265 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Hello super</title>
-    <script type="module" src="./index.js">
-    </script>
-  </head>
-  <body></body>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no">
+        <script type="module" src="https://supertestnet.github.io/weld/index.js"></script>
+        <script src="https://supertestnet.github.io/bankify/super_nostr.js"></script>
+        <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+        <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+        <script src="https://bundle.run/bech32@2.0.0"></script>
+        <style>
+            * {
+                box-sizing: border-box;
+                font-size: 1.15rem;
+                font-family: Arial, sans-serif;
+            }
+            html {
+                max-width: 800px;
+                padding: 3rem 1rem;
+                margin: auto;
+                line-height: 1.25;
+                padding: 0;
+            }
+            body {
+                margin: 3rem 1rem;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8rem;
+                font-size: 1.15rem;
+                border: 1px solid grey;
+            }
+            @media screen and (max-width: 600px) {
+            }
+        </style>
+        <script>
+            var $ = document.querySelector.bind( document );
+            var $$ = document.querySelectorAll.bind( document );
+            var url_params = new URLSearchParams( window.location.search );
+            var url_keys = url_params.keys();
+            var $_GET = {}
+            for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
+        </script>
+    </head>
+    <body>
+        <p>Enter bolt12 offer</p>
+        <p><input class="bolt12"></p>
+        <p><button class="submit_bolt12">Submit</button></p>
+        <script>
+            var bytesToHex = bytes => bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, "0" ), "" );
+            var hexToBytes = hex => Uint8Array.from( hex.match( /.{1,2}/g ).map( byte => parseInt( byte, 16 ) ) );
+            function hexToBech32( prefix, hex ) {
+                var words = bech32.bech32.toWords( hexToBytes( hex ) );
+                return bech32.bech32.encode( prefix, words, 100_000 );
+            }
+            var waitSomeSeconds = num => {
+                var num = num.toString() + "000";
+                num = Number( num );
+                return new Promise( resolve => setTimeout( resolve, num ) );
+            }
+            var init = async () => {
+                var privkey = super_nostr.bytesToHex( nobleSecp256k1.utils.randomPrivateKey() );
+                var pubkey = nobleSecp256k1.getPublicKey( privkey, true ).substring( 2 );
+                var relay = "wss://nostrue.com";
+                var welder = "a9e0692d4530f62e0ee0b3451f344fb01c46641830e3c97f6c9a7d28fa021f91";
+                var bolt12 = $( '.bolt12' ).value;
+                console.log( 'loading...' );
+                var amt = 15;
+                var msg = JSON.stringify({
+                    bolt12,
+                    amt,
+                });
+                var emsg = super_nostr.encrypt( privkey, welder, msg );
+                var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", welder ] ] );
+                console.log( event );
+                super_nostr.sendEvent( event, relay );
+                var now = Math.floor( Date.now() / 1000 );
+                var loop = async () => {
+                    await waitSomeSeconds( 5 );
+                    var ids = null;
+                    var authors = null;
+                    var kinds = [ 4 ];
+                    var until = null;
+                    var since = now;
+                    var limit = 1;
+                    var etags = null;
+                    var ptags = [ pubkey ];
+                    var events = await super_nostr.getEvents( relay, ids, authors, kinds, until, since, limit, etags, ptags );
+                    if ( !events.length ) return loop();
+                    var event = events[ 0 ];
+                    try {
+                        event.content = super_nostr.decrypt( privkey, event.pubkey, event.content );
+                    } catch ( e ) {}
+                    console.log( 'loaded!' );
+                    return event;
+                }
+                var event = await loop();
+                var bolt12_info = JSON.parse( event.content );
+                console.log( bolt12_info );
+                if ( bolt12_info[ "amount_msats" ] !== amt * 1000 ) return alert( `aborting because middleman tried to scam you!` );
+                //TODO: allow custom fees instead of hard coding it to 10
+                var amt_to_pay = amt + 10;
+                var timelock_to_use = bolt12_info[ "cltv_expiry_delta" ] + 10;
+                var msg = JSON.stringify({
+                    amt: amt_to_pay,
+                    pmthash: bolt12_info[ "payment_hash" ],
+                    timelock: timelock_to_use,
+                });
+                var emsg = super_nostr.encrypt( privkey, welder, msg );
+                var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", welder ] ] );
+                console.log( event );
+                super_nostr.sendEvent( event, relay );
+                await waitSomeSeconds( 1 );
+                var now = Math.floor( Date.now() / 1000 );
+                console.log( 'about to run loop...' );
+                var loop = async () => {
+                    console.log( 'running loop...' );
+                    await waitSomeSeconds( 5 );
+                    var ids = null;
+                    var authors = null;
+                    var kinds = [ 4 ];
+                    var until = null;
+                    var since = now;
+                    var limit = 1;
+                    var etags = null;
+                    var ptags = [ pubkey ];
+                    var events = await super_nostr.getEvents( relay, ids, authors, kinds, until, since, limit, etags, ptags );
+                    if ( !events.length ) return loop();
+                    var event = events[ 0 ];
+                    try {
+                        event.content = super_nostr.decrypt( privkey, event.pubkey, event.content );
+                    } catch ( e ) {}
+                    console.log( 'loaded!' );
+                    return event;
+                }
+                var event = await loop();
+                var bolt11_info = JSON.parse( event.content );
+                console.log( bolt11_info );
+                var now = Math.floor( Date.now() / 1000 );
+                var loop1 = async () => {
+                    await waitSomeSeconds( 1 );
+                    var msg = JSON.stringify({
+                        check_status: true,
+                        pmthash: bolt12_info[ "payment_hash" ],
+                    });
+                    var emsg = super_nostr.encrypt( privkey, welder, msg );
+                    var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", welder ] ] );
+                    console.log( event );
+                    super_nostr.sendEvent( event, relay );
+                    console.log( 'about to run loop2' );
+                    var loop2 = async () => {
+                        console.log( 'running loop2...' );
+                        await waitSomeSeconds( 5 );
+                        var ids = null;
+                        var authors = null;
+                        var kinds = [ 4 ];
+                        var until = null;
+                        var since = now;
+                        var limit = 1;
+                        var etags = null;
+                        var ptags = [ pubkey ];
+                        var events = await super_nostr.getEvents( relay, ids, authors, kinds, until, since, limit, etags, ptags );
+                        if ( !events.length ) return loop2();
+                        var event = events[ 0 ];
+                        try {
+                            event.content = super_nostr.decrypt( privkey, event.pubkey, event.content );
+                        } catch ( e ) {}
+                        console.log( 'loaded!' );
+                        return event;
+                    }
+                    var status = await loop2();
+                    console.log( JSON.parse( status.content ) );
+                    if ( JSON.parse( status.content ) === "SETTLED" ) return;
+                    return loop1();
+                }
+                await loop1();
+                console.log( 'settled!' );
+            }
+
+            $( '.submit_bolt12' ).onclick = init;
+            (async()=>{
+                await waitSomeSeconds( 1 );
+                var bolt12 = await bolt12parser.init( "https://supertestnet.github.io/weld/boltz_bolt12_bg.wasm" );
+            })();
+            // var bytesToHex = bytes => bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, "0" ), "" );
+            // function hexToBech32( prefix, hex ) {
+            //     var words = bech32.bech32m.toWords( hexToBytes( hex ) );
+            //     return bech32.bech32m.encode( prefix, words, 100_000 );
+            // }
+            // var offer = null;
+            // var run = async () => {
+            //     await waitSomeSeconds( 1 );
+            //     var bolt12 = await bolt12parser.init( "https://supertestnet.github.io/weld/boltz_bolt12_bg.wasm" );
+            //     offer = new bolt12parser.Offer( "lno1qsg95t28fvk7aefdum96rgwq3psqzyxvqfcsq3pv8dulvphcpuezmxx5n8h0evrqtx00ch2wevqzp8pvk4qeqqhw37mc9659ses3xkamaksfd9dspq6gkgmvzcl7eppzd3er2w80rgpq9ys6szwh4e33p82jmu42e9zgay44rhg6whr4gq9l6xe6jd7penguqqeua845ptusy3xs5wxwrytm9ck6dh8l739jmw2rfsu8nudvtef90hfn4aj55aw0ezxxf2excmead9vaqvjtuq6s9a580e85rz8mdvp26kuc5vr2llmuexrgxhxx66l400275a3535qpqvemxtpdvuvrwh83qkjl53eagqckyypeq87wey4833z750a5kr5ppfzemeuhtemw6jpty2gznf76zakkj0c" );
+            //     // offer.free();
+            // };
+            // run();
+        </script>
+        <script>
+            var hexToBase64 = hex => btoa( hex.match( /\w{2}/g ).map( a => String.fromCharCode( parseInt( a, 16 ) ) ).join( "" ) );
+            var base64ToBytes = str => {
+                var raw = atob( str );
+                var result = [];
+                var i; for ( i=0; i<raw.length; i++ ) result.push( raw.charCodeAt( i ) );
+                return new Uint8Array( result );
+            }
+        </script>
+        <script>
+            var encrypt = async ( privkey, pubkey, text ) => {
+                var msg = (new TextEncoder()).encode( text );
+                var iv = window.crypto.getRandomValues( new Uint8Array( 16 ) );
+                var key_raw = hexToBytes( nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 ) );
+                var key = await window.crypto.subtle.importKey(
+                    "raw",
+                    key_raw,
+                    "AES-CBC",
+                    false,
+                    ["encrypt", "decrypt"],
+                );
+                var emsg = await window.crypto.subtle.encrypt(
+                    {
+                        name: "AES-CBC",
+                        iv,
+                    },
+                    key,
+                    msg,
+                )
+                emsg = new Uint8Array( emsg );
+                var arr = emsg;
+                emsg = hexToBase64( bytesToHex( emsg ) ) + "?iv=" + btoa( String.fromCharCode.apply( null, iv ) );
+                return emsg;
+            }
+
+            var decrypt = async ( privkey, pubkey, ciphertext ) => {
+                var [ emsg, iv ] = ciphertext.split( "?iv=" );
+                var key_raw = hexToBytes( nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 ) );
+                var key = await window.crypto.subtle.importKey(
+                    "raw",
+                    key_raw,
+                    "AES-CBC",
+                    false,
+                    ["encrypt", "decrypt"],
+                );
+                var decrypted = await window.crypto.subtle.decrypt(
+                    {
+                        name: "AES-CBC",
+                        iv: base64ToBytes( iv ),
+                    },
+                    key,
+                    base64ToBytes( emsg ),
+                );
+
+                var msg = (new TextDecoder()).decode(decrypted);
+                return msg;
+            }
+        </script>
+    </body>
 </html>
